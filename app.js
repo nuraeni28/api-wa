@@ -7,9 +7,10 @@ const {  check, validationResult,} = require('express-validator');
 // const { Client,MessageMedia, LocalAuth } = require('whatsapp-web.js');
 const bcrypt = require("bcryptjs");
 const { create , isUserNameInUse, isWaInUse,} = require("./models/user_models");
+
 const { phoneNumberFormatter } = require('./helper/formatter');
-// const router = require("./routes/route");
-// const cors = require('cors');
+const router = require('./routes/route')
+const cors = require('cors');
 const server = http.createServer(app);
 require("@adiwajshing/baileys")
 const io = socketIO(server);
@@ -19,26 +20,10 @@ const port = process.env.PORT || 8088;
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-// app.use("/api/",router);
-// app.use(cors())
+app.use("/api/",router);
+app.use(cors())
 
-// const client = new Client({
-// 	restartOnAuthFail: true,
-// 	puppeteer: {
-// 	  headless: true,
-// 	  args: [
-// 		'--no-sandbox',
-// 		'--disable-setuid-sandbox',
-// 		'--disable-dev-shm-usage',
-// 		'--disable-accelerated-2d-canvas',
-// 		'--no-first-run',
-// 		'--no-zygote',
-// 		'--single-process', 
-// 		'--disable-gpu'
-// 	  ],
-// 	},
-// 	authStrategy: new LocalAuth()
-//   });
+
 
 const {
 	default: makeWASocket,
@@ -71,15 +56,24 @@ const store = makeInMemoryStore({});
 
 setInterval(() => store.writeToFile('./dataStore.json'), 10_000);
 
-async function startBot () {
-    const sock = makeWASocket({
+
+    async function startBot(){
+      const sock = makeWASocket({
         // can provide additional config here
-        printQRInTerminal: true, 
+        printQRInTerminal: false, 
         auth: state
     })
     sock.ev.on("connection.update", (update) => {
         console.log(update);
         const { connection, lastDisconnect ,qr} = update;
+        if (qr) {
+          io.on('connection', function(socket){
+            socket.emit('message', 'Connecting..');
+          qrcode.toDataURL(qr, (err, url) => {
+            socket.emit("qr", url);
+            socket.emit("message", "QR Code received, scan please!");
+          });
+        })};
         if (connection === "close") {
           const shouldReconnect = (lastDisconnect.error =
             Boom?.output?.statusCode !== DisconnectReason.loggedOut);
@@ -93,6 +87,7 @@ async function startBot () {
           if (shouldReconnect) {
             startBot();
           }
+       
           
         } else if (connection === "open") {
           console.log("opened connection");
@@ -110,7 +105,6 @@ async function startBot () {
 
       console.log('Contact list: ', contactsList);
     
-      
       app.post('/api/register', [
         check('nama','name cannot empty').notEmpty(),
         check('wa').notEmpty().withMessage('wa cannot empty')
@@ -175,50 +169,40 @@ async function startBot () {
     
           });
         });
-    });
-
+      })
+      app.post('/api/send_otp', [
+        check('wa').notEmpty().withMessage('wa cannot empty')  
+    ],(req,res) =>{
+        const errors = validationResult(req);
+        if(!errors.isEmpty()){
+            return res.status(400).json({errors : errors.array()})
+    
+        }
+        const body = req.body;
+        body.otp = (Math.floor(Math.random() * 10000) + 10000).toString().substring(1);
+        const number = phoneNumberFormatter(body.wa);
+        // body.createdAt = Date.now();
+        // body.expiredAt = Date.now();
+        
+        const pesan = 'Verifikasi kode register '+body.otp ;
+        sock.sendMessage(number,{text:pesan});
+          return res.status(201).json({
+            message:"Success",
+            data: req.body
+    
+          });
+        });
+    
+    }
+    
     app.get('/', (req, res) => {
         res.sendFile('index.html', {
           root: __dirname
         });
       });
     
-      io.on('connection', function(socket){
-        socket.emit('message', 'Connecting..');
-        makeWASocket.on('qr', qr => {
-            console.log('QR Received', qr);
-            qrcode.toDataURL(qr,(err,url) =>{
-                socket.emit('qr',url);
-                socket.emit('message', 'QR Code received, scan please!');
-            });
-        });
-        // client.on('ready' , () => {
-        //     socket.emit('message', 'Whatssapp is ready');
-        // })
-    })
-    
-    }
-    startBot();
-
-
-
-
-// client.on('message', message => {
-// 	if(message.body === 'Halo') {
-// 		message.reply('Halo juga!');
-// 	}
-// });
- 
-
-// client.initialize();
-
-
-
-
-
-
-// app.listen(8088,() => console.log('Server is running on port 8088'));
-
+      startBot();
+  
 
   
 server.listen(port, function() {
